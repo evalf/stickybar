@@ -53,7 +53,7 @@ class StickyBarOutput(io.IOBase):
 
 @contextlib.contextmanager
 def set_console_mode():
-  if platform.system() == 'Windows':
+  if platform.system() == 'Windows': # pragma: no cover
     import ctypes
     handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
     orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword

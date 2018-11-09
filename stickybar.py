@@ -20,36 +20,25 @@
 
 version = '1.0b0'
 
-import sys, io, contextlib, platform
+import sys, os, contextlib, platform, _thread, select
 
-class StickyBarOutput(io.IOBase):
-
-  def __init__(self, callback, *, buffer, index):
-    self._callback = callback
-    self._buffer = buffer
-    self._clear_bar = index + b'\033[2K\033[A'
-    self._save_and_open_bar = index + b'\033[A\0337' + index + b'\r\033[0;33m'
-    self._restore = b'\033[0m\0338'
-    self._clear_and_start_bar = b'\r\033[K\033[0;33m'
-    self._newline_and_clear = b'\033[0m' + index + b'\r\033[K'
-    super().__init__()
-
-  def writable(self):
-    return True
-
-  def isatty(self):
-    return self._buffer.isatty()
-
-  def write(self, text):
-    self._buffer.write(self._clear_bar + text + self._save_and_open_bar + self._callback(True) + self._restore)
-    self._buffer.flush()
-    return len(text)
-
-  def close(self):
-    if not self.closed:
-      self._buffer.write(self._clear_and_start_bar + self._callback(False) + self._newline_and_clear)
-      self._buffer.flush()
-      super().close()
+def read(fd):
+  text = os.read(fd, 1024)
+  while text:
+    yield text
+    text = os.read(fd, 1024)
+    
+def add_bar(callback, fdread, fdwrite, lock):
+  with lock, set_console_mode() as index:
+    clear_bar = index + b'\033[2K\033[A'
+    save_and_open_bar = index + b'\033[A\0337' + index + b'\r\033[0;33m'
+    restore = b'\033[0m\0338'
+    clear_and_start_bar = b'\r\033[K\033[0;33m'
+    newline_and_clear = b'\033[0m' + index + b'\r\033[K'
+    os.write(fdwrite, clear_bar + save_and_open_bar + callback(True) + restore)
+    for text in read(fdread):
+      os.write(fdwrite, clear_bar + text + save_and_open_bar + callback(True) + restore)
+    os.write(fdwrite, clear_and_start_bar + callback(False) + newline_and_clear)
 
 @contextlib.contextmanager
 def set_console_mode():
@@ -67,9 +56,23 @@ def set_console_mode():
     yield b'\033D'
 
 @contextlib.contextmanager
+def open(callback, stdout=None):
+  if stdout is None:
+    stdout = sys.stdout
+  lock = _thread.allocate_lock()
+  try:
+    fdread, fdwrite = os.pipe()
+    _thread.start_new_thread(add_bar, (lambda r: callback(r).encode(stdout.encoding), fdread, stdout.fileno(), lock))
+    with os.fdopen(fdwrite, 'w', buffering=1) as barout:
+      yield barout
+  finally:
+    lock.acquire()
+
+@contextlib.contextmanager
 def activate(callback):
-  enc = sys.stdout.encoding
-  with set_console_mode() as index, \
-       StickyBarOutput(lambda r: callback(r).encode(enc), buffer=sys.stdout.buffer, index=index) as sbo, \
-       contextlib.redirect_stdout(io.TextIOWrapper(sbo, encoding=enc, line_buffering=True)):
-    yield
+  stdout = sys.stdout
+  try:
+    with open(callback, stdout) as sys.stdout:
+      yield
+  finally:
+    sys.stdout = stdout

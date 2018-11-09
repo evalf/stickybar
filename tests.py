@@ -77,3 +77,21 @@ class StickyBar(unittest.TestCase):
       print('first line')
       self.assertScreen(0, 1, 'first line', '', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
     self.assertScreen(0, 2, 'first line', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
+
+  def test_interval(self):
+    i = 0
+    def bar(running):
+      nonlocal i
+      i += 1
+      return 'my bar'
+    if platform.system() == 'Windows':
+      with self.assertWarns(RuntimeWarning), stickybar.activate(bar, interval=.1):
+        print('first line')
+        time.sleep(1)
+      self.assertEqual(i, 3)
+    else:
+      with stickybar.activate(bar, interval=.1):
+        print('first line')
+        time.sleep(1)
+      self.assertGreater(i, 9)
+    self.assertScreen(0, 2, 'first line', 'my bar')

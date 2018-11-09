@@ -20,17 +20,18 @@
 
 version = '1.0b0'
 
-import sys, os, contextlib, platform, threading
+import sys, os, contextlib, platform, threading, select, warnings
 
 
 class StickyBar(threading.Thread):
 
-  def __init__(self, fdread, fdwrite, index, callback, encoding):
+  def __init__(self, fdread, fdwrite, index, callback, encoding, interval):
     self.fdread = fdread
     self.fdwrite = fdwrite
     self.index = index
     self.callback = callback
     self.encoding = encoding
+    self.interval = interval
     super().__init__()
 
   def run(self):
@@ -45,6 +46,8 @@ class StickyBar(threading.Thread):
   def read(self):
     yield b'' # initialize bar
     while True:
+      while self.interval and not select.select([self.fdread], [], [], self.interval)[0]:
+        yield b''
       try:
         text = os.read(self.fdread, 1024)
       except OSError:
@@ -71,7 +74,7 @@ class StickyBar(threading.Thread):
 
 
 @contextlib.contextmanager
-def activate(callback):
+def activate(callback, interval=0):
   with contextlib.ExitStack() as stack:
 
     # create virtual terminal
@@ -84,6 +87,9 @@ def activate(callback):
 
     # set console mode
     if platform.system() == 'Windows': # pragma: no cover
+      if interval:
+        warnings.warn('stickybar: "interval" is ignored on Windows', RuntimeWarning)
+        interval = 0
       import ctypes
       handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
       orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword
@@ -95,7 +101,7 @@ def activate(callback):
       index = b'\033D'
 
     # create thread
-    t = StickyBar(fdread, fileno, index, callback, sys.stdout.encoding)
+    t = StickyBar(fdread, fileno, index, callback, sys.stdout.encoding, interval)
     stack.callback(t.join)
 
     # replace stdout by virtual terminal

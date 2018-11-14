@@ -1,43 +1,31 @@
-import stickybar, unittest, pyte, io, sys, contextlib, platform
-
-class PyteBuffer:
-  def __init__(self, screen):
-    self._stream = pyte.ByteStream(screen)
-  def readable(self):
-    return False
-  def writable(self):
-    return True
-  def seekable(self):
-    return False
-  def isatty(self):
-    return True
-  def write(self, data):
-    self._stream.feed(data)
-  def flush(self):
-    pass
+import stickybar, unittest, pyte, sys, platform, os, time
 
 class StickyBar(unittest.TestCase):
 
   def setUp(self):
-    self._stdout = sys.stdout
-    self.screen = pyte.Screen(20, 6)
+    self.stdout = sys.stdout
+    self.screen = pyte.Screen(80, 6)
+    self.stream = pyte.ByteStream(self.screen)
     if platform.system() != 'Windows':
       self.screen.set_mode(pyte.modes.LNM)
-    sys.stdout = io.TextIOWrapper(PyteBuffer(self.screen), line_buffering=True)
+    self.fdread, fdwrite = os.pipe()
+    sys.stdout = os.fdopen(fdwrite, 'w', buffering=1)
 
   def tearDown(self):
-    sys.stdout = self._stdout
+    sys.stdout.close()
+    os.close(self.fdread)
+    sys.stdout = self.stdout
 
-  def assertCursor(self, x, y):
+  def assertScreen(self, x, y, *lines, error=False):
+    time.sleep(.1)
+    self.stream.feed(os.read(self.fdread, 1024))
     self.assertEqual(self.screen.cursor.x, x)
     self.assertEqual(self.screen.cursor.y, y)
-
-  def assertScreen(self, *lines):
     for i in range(self.screen.lines):
       for j in range(self.screen.columns):
         char = self.screen.buffer[i][j]
         self.assertEqual(char.data, lines[i][j] if i < len(lines) and j < len(lines[i]) else ' ')
-        self.assertEqual(char.fg, 'brown' if i == len(lines)-1 and j < len(lines[i]) else 'default')
+        self.assertEqual(char.fg, 'default' if i != len(lines)-1 or j >= len(lines[i]) else 'red' if error else 'brown')
         self.assertEqual(char.bg, 'default')
         self.assertFalse(char.bold)
         self.assertFalse(char.italics)
@@ -46,51 +34,64 @@ class StickyBar(unittest.TestCase):
         self.assertFalse(char.reverse)
 
   def printscreen(self): # for debugging
-    sys.stderr.writelines('{0}|{1}|{0}\n'.format(i, ''.join(self.screen.buffer[i][j].data for j in range(self.screen.columns))) for i in range(self.screen.lines))
+    time.sleep(.1)
+    self.stream.feed(os.read(self.fdread, 1024))
+    for i in range(self.screen.lines):
+      print(i, '|', *(self.screen.buffer[i][j].data for j in range(self.screen.columns)), '|', i, sep='', file=self.stdout)
 
   def test_output(self):
     with stickybar.activate(lambda running: 'my bar'):
       print('first line')
-      self.assertScreen('first line', '', 'my bar')
-      self.assertCursor(0, 1)
+      self.assertScreen(0, 1, 'first line', '', 'my bar')
       print('second line')
-      self.assertScreen('first line', 'second line', '', 'my bar')
-      self.assertCursor(0, 2)
-    self.assertScreen('first line', 'second line', 'my bar')
-    self.assertCursor(0, 3)
+      self.assertScreen(0, 2, 'first line', 'second line', '', 'my bar')
+    self.assertScreen(0, 3, 'first line', 'second line', 'my bar')
 
   def test_scroll(self):
     with stickybar.activate(lambda running: 'my bar'):
       for i in range(10):
         print('line', i)
-      self.assertScreen('line 6', 'line 7', 'line 8', 'line 9', '', 'my bar')
-      self.assertCursor(0, 4)
-    self.assertScreen('line 6', 'line 7', 'line 8', 'line 9', 'my bar')
-    self.assertCursor(0, 5)
+      self.assertScreen(0, 4, 'line 6', 'line 7', 'line 8', 'line 9', '', 'my bar')
+    self.assertScreen(0, 5, 'line 6', 'line 7', 'line 8', 'line 9', 'my bar')
 
   def test_restore(self):
     with stickybar.activate(lambda running: 'my bar'):
       print('first line')
       print('second line', end='', flush=True)
-      self.assertScreen('first line', 'second line', 'my bar')
-      self.assertCursor(11, 1)
-    self.assertScreen('first line', 'my bar')
-    self.assertCursor(0, 2)
+      self.assertScreen(11, 1, 'first line', 'second line', 'my bar')
+    self.assertScreen(0, 2, 'first line', 'my bar')
 
   def test_callback(self):
+    val = 10
     with stickybar.activate(lambda running: 'val={} run={}'.format(val, running)):
-      val = 10
       print('first line')
-      self.assertScreen('first line', '', 'val=10 run=True')
-      self.assertCursor(0, 1)
+      self.assertScreen(0, 1, 'first line', '', 'val=10 run=True')
       val = 20
       print('second line')
-      self.assertScreen('first line', 'second line', '', 'val=20 run=True')
-      self.assertCursor(0, 2)
+      self.assertScreen(0, 2, 'first line', 'second line', '', 'val=20 run=True')
       val = 30
-    self.assertScreen('first line', 'second line', 'val=30 run=False')
-    self.assertCursor(0, 3)
+    self.assertScreen(0, 3, 'first line', 'second line', 'val=30 run=False')
 
-  def test_isatty(self):
-    with stickybar.activate(lambda running: 'my bar'):
-      self.assertTrue(sys.stdout.isatty())
+  def test_error(self):
+    with stickybar.activate(lambda running: 'val={:.1f}'.format('foo')):
+      print('first line')
+      self.assertScreen(0, 1, 'first line', '', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
+    self.assertScreen(0, 2, 'first line', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
+
+  def test_interval(self):
+    i = 0
+    def bar(running):
+      nonlocal i
+      i += 1
+      return 'my bar'
+    if platform.system() == 'Windows':
+      with self.assertWarns(RuntimeWarning), stickybar.activate(bar, interval=.1):
+        print('first line')
+        time.sleep(1)
+      self.assertEqual(i, 3)
+    else:
+      with stickybar.activate(bar, interval=.1):
+        print('first line')
+        time.sleep(1)
+      self.assertGreater(i, 9)
+    self.assertScreen(0, 2, 'first line', 'my bar')

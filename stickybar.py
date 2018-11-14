@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-version = '1.0b0'
+version = '1.0b1'
 
 import sys, os, contextlib, platform, threading, select, warnings
 

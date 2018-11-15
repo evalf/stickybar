@@ -104,8 +104,9 @@ def activate(callback, update=0):
       handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
       orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword
       ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(orig_mode)) # https://docs.microsoft.com/en-us/windows/console/getconsolemode
-      ctypes.windll.kernel32.SetConsoleMode(handle, orig_mode.value | 4) # add ENABLE_VIRTUAL_TERMINAL_PROCESSING, https://docs.microsoft.com/en-us/windows/console/setconsolemode
-      stack.callback(ctypes.windll.kernel32.SetConsoleMode, handle, orig_mode)
+      if not orig_mode.value & 4: # check ENABLE_VIRTUAL_TERMINAL_PROCESSING flag
+        ctypes.windll.kernel32.SetConsoleMode(handle, orig_mode.value | 4) # https://docs.microsoft.com/en-us/windows/console/setconsolemode
+        stack.callback(ctypes.windll.kernel32.SetConsoleMode, handle, orig_mode)
 
       # In Windows, `sys.stdout` becomes unusable after
       # `os.dup2(..,sys.stdout.fileno())`, hence we recreate `sys.stdout` here.

@@ -20,41 +20,43 @@
 
 version = '1.0b1'
 
-import sys, os, contextlib, platform, threading, select, warnings
+import sys, os, contextlib, platform, threading, select, warnings, time
 
 
 class StickyBar(threading.Thread):
 
-  def __init__(self, fdread, fdwrite, index, callback, encoding, interval):
+  def __init__(self, fdread, fdwrite, callback, encoding, update):
     self.fdread = fdread
     self.fdwrite = fdwrite
-    self.index = index
     self.callback = callback
     self.encoding = encoding
-    self.interval = interval
+    self.update = update
     super().__init__()
 
   def run(self):
-    clear_bar = self.index + b'\033[2K\033[A' # clear line below cursor (scroll if necessary) and return to position
-    new_empty_line = self.index + b'\r\033[K' # move to beginning of next line and clear
-    save_and_open_bar = self.index + b'\033[A\0337\033[B' # save cursor and move to beginning of next line
-    restore = b'\0338' # restore cursor
+    self.write(b'\n' + self.bar(True) + b'\r\033[A\033[K')
     for text in self.read():
-      self.write(clear_bar + text + save_and_open_bar + self.bar(True) + restore)
-    self.write(self.bar(False) + new_empty_line)
+      self.write(text.replace(b'\n', b'\n\n\033[A\033[L') if text else b'\0337\033[B' + self.bar(True) + b'\0338')
+    self.write(self.bar(False) + b'\r\n\033[K')
+
+  def poll(self, timeout):
+    return timeout > 0 and (platform.system() == 'Windows' or select.select([self.fdread], [], [], timeout)[0])
 
   def read(self):
-    yield b'' # initialize bar
-    while True:
-      while self.interval and not select.select([self.fdread], [], [], self.interval)[0]:
-        yield b''
-      try:
+    try:
+      nextupdate = time.perf_counter() + self.update
+      while True:
+        while self.update > 0 and not self.poll(nextupdate - time.perf_counter()):
+          yield b''
+          nextupdate += self.update
         text = os.read(self.fdread, 1024)
-      except OSError:
-        return
-      if not text:
-        return
-      yield text
+        if not text:
+          break
+        yield text
+        if self.update < 0: # redraw bar after every write
+          yield b''
+    except OSError:
+      pass
 
   def write(self, data):
     while data:
@@ -63,18 +65,17 @@ class StickyBar(threading.Thread):
 
   def bar(self, running):
     try:
-      bar = b'\033[0;33m' + self.callback(running).encode(self.encoding)
+      text = self.callback(running)
+      color = 3 # yellow
     except Exception as e:
-      try:
-        msg = str(e).encode(self.encoding)
-      except:
-        msg = b'unknown error'
-      bar = b'\033[0;31mcallback failed: ' + msg
-    return b'\r\033[K' + bar + b'\033[0m'
+      text = '{}: {}'.format(getattr(type(e), '__name__', 'callback failed'), e)
+      color = 1 # red
+    return b'\r\033[K\033[0;3%dm%s\033[0m' % (color, text.encode(self.encoding, errors='ignore'))
 
 
 @contextlib.contextmanager
-def activate(callback, interval=0):
+def activate(callback, update=0):
+
   with contextlib.ExitStack() as stack:
 
     # create virtual terminal
@@ -85,31 +86,26 @@ def activate(callback, interval=0):
     fileno = os.dup(sys.stdout.fileno())
     stack.callback(os.close, fileno)
 
-    # set console mode
-    if platform.system() == 'Windows': # pragma: no cover
-      if interval:
-        warnings.warn('stickybar: "interval" is ignored on Windows', RuntimeWarning)
-        interval = 0
-      import ctypes
-      handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
-      orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword
-      ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(orig_mode)) # https://docs.microsoft.com/en-us/windows/console/getconsolemode
-      ctypes.windll.kernel32.SetConsoleMode(handle, orig_mode.value | 4 | 8) # add ENABLE_VIRTUAL_TERMINAL_PROCESSING and DISABLE_NEWLINE_AUTO_RETURN, https://docs.microsoft.com/en-us/windows/console/setconsolemode
-      stack.callback(ctypes.windll.kernel32.SetConsoleMode, handle, orig_mode)
-      index = b'\n'
-    else:
-      index = b'\033D'
-
     # create thread
-    t = StickyBar(fdread, fileno, index, callback, sys.stdout.encoding, interval)
+    t = StickyBar(fdread, fileno, callback, sys.stdout.encoding, update)
     stack.callback(t.join)
 
     # replace stdout by virtual terminal
     os.dup2(fdwrite, sys.stdout.fileno())
-    os.close(fdwrite)
     stack.callback(os.dup2, fileno, sys.stdout.fileno()) # restore stdout and signal to thread
+    os.close(fdwrite)
 
     if platform.system() == 'Windows': # pragma: no cover
+
+      # set console mode
+      import ctypes
+      handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
+      orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword
+      ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(orig_mode)) # https://docs.microsoft.com/en-us/windows/console/getconsolemode
+      if not orig_mode.value & 4: # check ENABLE_VIRTUAL_TERMINAL_PROCESSING flag
+        ctypes.windll.kernel32.SetConsoleMode(handle, orig_mode.value | 4) # https://docs.microsoft.com/en-us/windows/console/setconsolemode
+        stack.callback(ctypes.windll.kernel32.SetConsoleMode, handle, orig_mode)
+
       # In Windows, `sys.stdout` becomes unusable after
       # `os.dup2(..,sys.stdout.fileno())`, hence we recreate `sys.stdout` here.
       # Because a pipe is not a tty, `fdopen` defaults to buffering with fixed

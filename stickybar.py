@@ -74,7 +74,7 @@ class StickyBar(threading.Thread):
 
 
 @contextlib.contextmanager
-def activate(callback, update=0):
+def activate(callback, update):
 
   with contextlib.ExitStack() as stack:
 

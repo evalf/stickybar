@@ -106,5 +106,5 @@ class StickyBar(unittest.TestCase):
   def test_error(self):
     with stickybar.activate(lambda running: 'val={:.1f}'.format('foo')):
       print('first line')
-      self.assertScreen(0, 1, 'first line', '', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
-    self.assertScreen(0, 2, 'first line', "callback failed: Unknown format code 'f' for object of type 'str'", error=True)
+      self.assertScreen(0, 1, 'first line', '', "ValueError: Unknown format code 'f' for object of type 'str'", error=True)
+    self.assertScreen(0, 2, 'first line', "ValueError: Unknown format code 'f' for object of type 'str'", error=True)

@@ -65,14 +65,12 @@ class StickyBar(threading.Thread):
 
   def bar(self, running):
     try:
-      bar = b'\033[0;33m' + self.callback(running).encode(self.encoding)
+      text = self.callback(running)
+      color = 3 # yellow
     except Exception as e:
-      try:
-        msg = str(e).encode(self.encoding)
-      except:
-        msg = b'unknown error'
-      bar = b'\033[0;31mcallback failed: ' + msg
-    return b'\r\033[K' + bar + b'\033[0m'
+      text = '{}: {}'.format(getattr(type(e), '__name__', 'callback failed'), e)
+      color = 1 # red
+    return b'\r\033[K\033[0;3%dm%s\033[0m' % (color, text.encode(self.encoding, errors='ignore'))
 
 
 @contextlib.contextmanager

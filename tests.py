@@ -48,7 +48,7 @@ class StickyBar(unittest.TestCase):
       print(i, '|', *(self.screen.buffer[i][j].data for j in range(self.screen.columns)), '|', i, sep='', file=self.stdout)
 
   def test_output(self):
-    with stickybar.activate(lambda running: 'my bar'):
+    with stickybar.activate(lambda running: 'my bar', update=0):
       print('first line')
       self.assertScreen(0, 1, 'first line', '', 'my bar')
       print('second line')
@@ -56,14 +56,14 @@ class StickyBar(unittest.TestCase):
     self.assertScreen(0, 3, 'first line', 'second line', 'my bar')
 
   def test_scroll(self):
-    with stickybar.activate(lambda running: 'my bar'):
+    with stickybar.activate(lambda running: 'my bar', update=0):
       for i in range(10):
         print('line', i)
       self.assertScreen(0, 4, 'line 6', 'line 7', 'line 8', 'line 9', '', 'my bar')
     self.assertScreen(0, 5, 'line 6', 'line 7', 'line 8', 'line 9', 'my bar')
 
   def test_restore(self):
-    with stickybar.activate(lambda running: 'my bar'):
+    with stickybar.activate(lambda running: 'my bar', update=0):
       print('first line')
       print('second line', end='', flush=True)
       self.assertScreen(11, 1, 'first line', 'second line', 'my bar')
@@ -104,7 +104,7 @@ class StickyBar(unittest.TestCase):
     self.assertScreen(0, 3, 'first line', 'second line', 'val=3 run=False')
 
   def test_error(self):
-    with stickybar.activate(lambda running: 'val={:.1f}'.format('foo')):
+    with stickybar.activate(lambda running: 'val={:.1f}'.format('foo'), update=0):
       print('first line')
       self.assertScreen(0, 1, 'first line', '', "ValueError: Unknown format code 'f' for object of type 'str'", error=True)
     self.assertScreen(0, 2, 'first line', "ValueError: Unknown format code 'f' for object of type 'str'", error=True)

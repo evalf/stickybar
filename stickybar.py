@@ -95,7 +95,7 @@ def activate(callback, update):
     stack.callback(os.dup2, fileno, sys.stdout.fileno()) # restore stdout and signal to thread
     os.close(fdwrite)
 
-    if platform.system() == 'Windows': # pragma: no cover
+    if platform.system() == 'Windows':
 
       # set console mode
       import ctypes

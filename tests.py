@@ -4,7 +4,7 @@ class StickyBar(unittest.TestCase):
 
   def setUp(self):
     self.stdout = sys.stdout
-    self.screen = pyte.Screen(80, 6)
+    self.screen = pyte.Screen(60, 6)
     self.stream = pyte.ByteStream(self.screen)
     if platform.system() != 'Windows':
       self.screen.set_mode(pyte.modes.LNM)
@@ -54,6 +54,23 @@ class StickyBar(unittest.TestCase):
       print('second line')
       self.assertScreen(0, 2, 'first line', 'second line', '', 'my bar')
     self.assertScreen(0, 3, 'first line', 'second line', 'my bar')
+
+  def test_long_output(self):
+    with stickybar.activate(lambda running: 'my bar', update=0):
+      print('first line')
+      self.assertScreen(0, 1, 'first line', '', 'my bar')
+      print('second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz')
+      self.assertScreen(0, 2, 'first line', 'second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrsz', '', 'my bar')
+    self.assertScreen(0, 3, 'first line', 'second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrsz', 'my bar')
+
+  def test_long_status(self):
+    with stickybar.activate(lambda running: 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz', update=0):
+      print('first line')
+      self.assertScreen(0, 1, 'first line', '', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxz')
+      print('second line')
+      self.assertScreen(0, 2, 'first line', 'second line', '', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxz')
+    self.printscreen()
+    self.assertScreen(0, 3, 'first line', 'second line', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxz')
 
   def test_scroll(self):
     with stickybar.activate(lambda running: 'my bar', update=0):

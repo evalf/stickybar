@@ -95,15 +95,20 @@ def activate(callback, update):
     stack.callback(os.dup2, fileno, sys.stdout.fileno()) # restore stdout and signal to thread
     os.close(fdwrite)
 
-    if platform.system() == 'Windows':
-
+    if platform.system() != 'Windows':
+      os.write(fileno, b'\033[?7l') # disable line wrap
+      stack.callback(os.write, fileno, b'\033[?7h') # enable line wrap
+    else:
       # set console mode
       import ctypes
       handle = ctypes.windll.kernel32.GetStdHandle(-11) # https://docs.microsoft.com/en-us/windows/console/getstdhandle
       orig_mode = ctypes.c_uint32() # https://docs.microsoft.com/en-us/windows/desktop/WinProg/windows-data-types#lpdword
       ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(orig_mode)) # https://docs.microsoft.com/en-us/windows/console/getconsolemode
-      if not orig_mode.value & 4: # check ENABLE_VIRTUAL_TERMINAL_PROCESSING flag
-        ctypes.windll.kernel32.SetConsoleMode(handle, orig_mode.value | 4) # https://docs.microsoft.com/en-us/windows/console/setconsolemode
+      new_mode = orig_mode.value
+      new_mode |= 4 # check ENABLE_VIRTUAL_TERMINAL_PROCESSING
+      new_mode &= ~2 # uncheck ENABLE_WRAP_AT_EOL_OUTPUT
+      if new_mode != orig_mode.value:
+        ctypes.windll.kernel32.SetConsoleMode(handle, new_mode) # https://docs.microsoft.com/en-us/windows/console/setconsolemode
         stack.callback(ctypes.windll.kernel32.SetConsoleMode, handle, orig_mode)
 
       # In Windows, `sys.stdout` becomes unusable after

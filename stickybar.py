@@ -70,7 +70,7 @@ class StickyBar(threading.Thread):
     except Exception as e:
       text = '{}: {}'.format(getattr(type(e), '__name__', 'callback failed'), e)
       color = 1 # red
-    return b'\r\033[K\033[0;3%dm%s\033[0m' % (color, text.encode(self.encoding, errors='ignore'))
+    return b'\r\033[0;3%dm%s\033[0m\033[K' % (color, text.encode(self.encoding, errors='ignore'))
 
 
 @contextlib.contextmanager

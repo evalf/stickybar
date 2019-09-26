@@ -34,10 +34,10 @@ class StickyBar(threading.Thread):
     super().__init__()
 
   def run(self):
-    self.write(b'\n' + self.bar(True) + b'\r\033[A\033[K')
+    self.write(b'\n' + self.callback().encode(self.encoding, errors='ignore') + b'\r\033[A\033[K')
     for text in self.read():
-      self.write(text.replace(b'\n', b'\n\n\033[A\033[L') if text else b'\0337\033[B' + self.bar(True) + b'\0338')
-    self.write(self.bar(False) + b'\r\n\033[K')
+      self.write(text.replace(b'\n', b'\n\n\033[A\033[L') if text else b'\0337\033[B\r' + self.callback().encode(self.encoding, errors='ignore') + b'\033[K\0338')
+    self.write(b'\033[B\033[2K\033[A')
 
   def poll(self, timeout):
     return timeout > 0 and (platform.system() == 'Windows' or select.select([self.fdread], [], [], timeout)[0])
@@ -63,18 +63,24 @@ class StickyBar(threading.Thread):
       n = os.write(self.fdwrite, data)
       data = data[n:]
 
-  def bar(self, running):
+
+@contextlib.contextmanager
+def activate(callback, update):
+  def bar(arg=True):
     try:
-      text = self.callback(running)
+      text = callback(arg)
       color = 3 # yellow
     except Exception as e:
       text = '{}: {}'.format(getattr(type(e), '__name__', 'callback failed'), e)
       color = 1 # red
-    return b'\r\033[0;3%dm%s\033[0m\033[K' % (color, text.encode(self.encoding, errors='ignore'))
+    return '\033[0;3{}m{}\033[0m'.format(color, text)
+  with draw(bar, update):
+    yield
+  print('\r{}\033[K'.format(bar(False)))
 
 
 @contextlib.contextmanager
-def activate(callback, update):
+def draw(callback, update):
 
   with contextlib.ExitStack() as stack:
 

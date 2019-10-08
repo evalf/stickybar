@@ -1,4 +1,17 @@
-import stickybar, unittest, pyte, sys, platform, os, time
+import stickybar, unittest, pyte, sys, platform, os, time, ctypes
+
+class kernel32:
+  def __init__(self, screen):
+    self.screen = screen
+  def GetStdHandle(self, n):
+    pass
+  def GetConsoleMode(self, h, m):
+    m._obj.value = 2
+  def SetConsoleMode(self, h, m):
+    if m.value & 2:
+      self.screen.set_mode(pyte.modes.DECAWM)
+    else:
+      self.screen.reset_mode(pyte.modes.DECAWM)
 
 class StickyBar(unittest.TestCase):
 
@@ -6,7 +19,10 @@ class StickyBar(unittest.TestCase):
     self.stdout = sys.stdout
     self.screen = pyte.Screen(60, 6)
     self.stream = pyte.ByteStream(self.screen)
-    if platform.system() != 'Windows':
+    if platform.system() == 'Windows':
+      self.WinDLL = ctypes.WinDLL
+      ctypes.WinDLL = lambda name, *args, **kwargs: kernel32(self.screen) if name == 'kernel32' else self.WinDLL(name, *args, **kwargs)
+    else:
       self.screen.set_mode(pyte.modes.LNM)
     self.fdread, fdwrite = os.pipe()
     self.fdwrite = os.dup(fdwrite)
@@ -17,6 +33,8 @@ class StickyBar(unittest.TestCase):
     os.close(self.fdread)
     os.close(self.fdwrite)
     sys.stdout = self.stdout
+    if platform.system() == 'Windows':
+      ctypes.WinDLL = self.WinDLL
 
   def updateScreen(self):
     sys.stdout.flush()

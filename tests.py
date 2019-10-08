@@ -1,12 +1,28 @@
-import stickybar, unittest, pyte, sys, platform, os, time
+import stickybar, unittest, pyte, sys, platform, os, time, ctypes
+
+class kernel32:
+  def __init__(self, screen):
+    self.screen = screen
+  def GetStdHandle(self, n):
+    pass
+  def GetConsoleMode(self, h, m):
+    m._obj.value = 2
+  def SetConsoleMode(self, h, m):
+    if m.value & 2:
+      self.screen.set_mode(pyte.modes.DECAWM)
+    else:
+      self.screen.reset_mode(pyte.modes.DECAWM)
 
 class StickyBar(unittest.TestCase):
 
   def setUp(self):
     self.stdout = sys.stdout
-    self.screen = pyte.Screen(80, 6)
+    self.screen = pyte.Screen(60, 6)
     self.stream = pyte.ByteStream(self.screen)
-    if platform.system() != 'Windows':
+    if platform.system() == 'Windows':
+      self.WinDLL = ctypes.WinDLL
+      ctypes.WinDLL = lambda name, *args, **kwargs: kernel32(self.screen) if name == 'kernel32' else self.WinDLL(name, *args, **kwargs)
+    else:
       self.screen.set_mode(pyte.modes.LNM)
     self.fdread, fdwrite = os.pipe()
     self.fdwrite = os.dup(fdwrite)
@@ -17,6 +33,8 @@ class StickyBar(unittest.TestCase):
     os.close(self.fdread)
     os.close(self.fdwrite)
     sys.stdout = self.stdout
+    if platform.system() == 'Windows':
+      ctypes.WinDLL = self.WinDLL
 
   def updateScreen(self):
     sys.stdout.flush()
@@ -26,7 +44,7 @@ class StickyBar(unittest.TestCase):
     assert data[-1:] != 0 # assert data ends with token byte
     self.stream.feed(data[:-1]) # update pyte screen
 
-  def assertScreen(self, x, y, *lines, error=False):
+  def assertScreen(self, x, y, *lines, error=False, nbar=1):
     self.updateScreen()
     self.assertEqual(self.screen.cursor.x, x)
     self.assertEqual(self.screen.cursor.y, y)
@@ -34,7 +52,7 @@ class StickyBar(unittest.TestCase):
       for j in range(self.screen.columns):
         char = self.screen.buffer[i][j]
         self.assertEqual(char.data, lines[i][j] if i < len(lines) and j < len(lines[i]) else ' ')
-        self.assertEqual(char.fg, 'default' if i != len(lines)-1 or j >= len(lines[i]) else 'red' if error else 'brown')
+        self.assertEqual(char.fg, 'default' if not 0 < len(lines)-i <= nbar or j >= len(lines[i]) else 'red' if error else 'brown')
         self.assertEqual(char.bg, 'default')
         self.assertFalse(char.bold)
         self.assertFalse(char.italics)
@@ -54,6 +72,22 @@ class StickyBar(unittest.TestCase):
       print('second line')
       self.assertScreen(0, 2, 'first line', 'second line', '', 'my bar')
     self.assertScreen(0, 3, 'first line', 'second line', 'my bar')
+
+  def test_long_output(self):
+    with stickybar.activate(lambda running: 'my bar', update=0):
+      print('first line')
+      self.assertScreen(0, 1, 'first line', '', 'my bar')
+      print('second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz')
+      self.assertScreen(0, 2, 'first line', 'second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrsz', '', 'my bar')
+    self.assertScreen(0, 3, 'first line', 'second line: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrsz', 'my bar')
+
+  def test_long_status(self):
+    with stickybar.activate(lambda running: 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz', update=0):
+      print('first line')
+      self.assertScreen(0, 1, 'first line', '', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxz')
+      print('second line')
+      self.assertScreen(0, 2, 'first line', 'second line', '', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxz')
+    self.assertScreen(0, 4, 'first line', 'second line', 'my bar: abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxy', 'z', nbar=2)
 
   def test_scroll(self):
     with stickybar.activate(lambda running: 'my bar', update=0):
